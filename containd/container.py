@@ -17,7 +17,6 @@ class Container:
         stacksize_A=65536,
         stacksize_B=1,
     ):
-
         self.id = uuid.uuid4().hex
         self.rootfs_path = rootfs_path
         self.pids_max = pids_max
@@ -28,9 +27,7 @@ class Container:
         self.cgroup_relpath = "containd/" + self.id + "/"
         self.cgroup_abspath = "/sys/fs/cgroup/" + self.cgroup_relpath
 
-        _mk_cgroup(
-            "root", "root", "memory,pids", self.cgroup_relpath
-        )
+        _mk_cgroup("root", "root", "memory,pids", self.cgroup_relpath)
 
     def _ensure_cgroup_limits(self):
         _write_cgroup(self.cgroup_abspath + "cgroup.procs", os.getpid())
@@ -47,12 +44,14 @@ class Container:
         os.environ["PATH"] = "/bin/:/sbin/:/usr/bin/:/usr/sbin"
 
     def _jail_setup_fs(self):
-        libc.mount(
-            "proc".encode(), "/proc".encode(), "proc".encode(), 0, 0
-        )  # libc str's must be byte's
+        libc.mount("proc".encode(), "/proc".encode(), "proc".encode(), 0, 0)
+        libc.mount("dev".encode(), "/dev".encode(), "devtmpfs".encode(), 0, 0)
+        libc.mount("sys".encode(), "/sys".encode(), "sysfs".encode(), 0, 0)
 
     def _jail_cleanup(self):
         libc.umount("/proc".encode())
+        libc.umount("/dev".encode())
+        libc.umount("/sys".encode())
 
     def _clone_process(self, fn, ssize, flags):
         libc.clone(CFUNCTYPE(c_int)(fn), _allocate_stack(ssize), flags)
@@ -62,7 +61,7 @@ class Container:
         _rm_cgroup("memory,pids", "containd/" + self.id)
 
     def run(self, cmd):
-        def inner():
+        def jail():
             self._setup_root()  # Root set belongs in child since we need to exit sandbox on function exit
             self._jail_setup_fs()
             self._jail_setup_variables()
@@ -72,13 +71,13 @@ class Container:
                 return 0
 
             self._clone_process(
-                inner, self.stacksize_B, SIGCHLD
+                inner, self.stacksize_B, SIGCHLD | CLONE_NEWPID
             )  # Somehow the stack size fixes everything
             self._jail_cleanup()
             return 0  # Must return
 
         self._ensure_cgroup_limits()
         self._clone_process(
-            inner, self.stacksize_A, CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD
+            jail, self.stacksize_A, CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD
         )
         self._cleanup()
