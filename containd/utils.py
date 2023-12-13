@@ -1,6 +1,16 @@
 import subprocess
-from ctypes import c_char_p, c_void_p, cast
 import os
+import inspect
+from ctypes import c_char_p, c_void_p, cast
+
+
+def root_required(obj):
+    def inner(*args, **kwargs):
+        if os.getuid() != 0:
+            raise Exception("Container must be run as root")
+        return obj(*args, **kwargs)
+
+    return inner
 
 
 def _allocate_stack(ssize):
@@ -30,8 +40,8 @@ def _write_cgroup(abspath, value):
         f.write(str(value))
 
 
+@root_required
 def purge_all():
-    # return [x[0] for x in os.walk("/sys/fs/cgroup/containd/")]
     dirs = next(os.walk("/sys/fs/cgroup/containd"))[1]
     for d in dirs:
         _rm_cgroup("memory,pid", "containd/" + d)

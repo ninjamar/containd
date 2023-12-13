@@ -1,69 +1,48 @@
 import os
 import uuid
-import configparser
 from ctypes import CFUNCTYPE, c_int, CDLL
 from .flags import *
-from .utils import _write_cgroup, _mk_cgroup, _rm_cgroup, _allocate_stack
+from .utils import _write_cgroup, _mk_cgroup, _rm_cgroup, _allocate_stack, root_required
 
 libc = CDLL("libc.so.6")
-BASE_CONFIGURATION_PATH = os.path.expanduser(
-    f"~{os.environ.get('SUDO_USER', 'root')}/.containd"
-)
 
 
+@root_required
 class Container:
-    def __init__(self, _id=None, _DEBUG_SKIP=False, options={}):
-        if os.getuid() != 0:
-            raise Exception("Container must be run as root")
-        self.config = {}
-        if not _DEBUG_SKIP:  # Temp should still assign id but clear cgroup on leave
-            if not os.path.exists(BASE_CONFIGURATION_PATH):
-                os.mknod(BASE_CONFIGURATION_PATH)
-            if _id is not None:  # id given
-                config = configparser.ConfigParser()
-                config.read(BASE_CONFIGURATION_PATH)
+    def __init__(
+        self,
+        rootfs_path=None,
+        pids_max="max",
+        memory_max="max",
+        stacksize_A=65536,
+        stacksize_B=1,
+    ):
+        # if os.getuid() != 0:
+        #    raise Exception("Container must be run as root")
 
-                for key in config[_id].keys():  # unpack configuration
-                    self.config[key] = config[_id][key]
-                    self.config["id"] = _id
+        self.id = uuid.uuid4().hex
+        self.rootfs_path = rootfs_path
+        self.pids_max = pids_max
+        self.memory_max = memory_max
+        self.stacksize_A = stacksize_A
+        self.stacksize_B = stacksize_B
 
-                self._ensure_cgroup_by_id(_id)
-            else:  # manually create a new config
-                config = configparser.ConfigParser()
-                config.read(BASE_CONFIGURATION_PATH)
-                _id = uuid.uuid4().hex
-                for key, value in options.items():
-                    self.config[key] = value
-                self.config["id"] = _id
-                #  self._extract_config(config, _id)
-
-                with open(BASE_CONFIGURATION_PATH, "w") as f:
-                    config.write(f)
-
-                self._ensure_cgroup_by_id(_id)
-        else:  # no storage of configuration
-            self.config = options  # TODO: is valid?
-            self.config["id"] = -1
-
-        self.id = self.config["id"]  # Expose ID to the end user
         self.cgroup_relpath = "containd/" + self.id + "/"
         self.cgroup_abspath = "/sys/fs/cgroup/" + self.cgroup_relpath
 
     def _ensure_cgroup_limits(self):
-        print(os.getpid(), self.config["pids.max"], self.config["memory.max"])
         _write_cgroup(self.cgroup_abspath + "cgroup.procs", os.getpid())
-        _write_cgroup(self.cgroup_abspath + "pids.max", self.config["pids.max"])
-        _write_cgroup(self.cgroup_abspath + "memory.max", self.config["memory.max"])
+        _write_cgroup(self.cgroup_abspath + "pids.max", self.pids_max)
+        _write_cgroup(self.cgroup_abspath + "memory.max", self.memory_max)
 
     def _ensure_cgroup_by_id(self, _id):
         # TODO: Don't create cgroup if it already exists
         _mk_cgroup(
             "root", "root", "memory,pids", "containd/" + _id
         )  #  groups use abs path
-        # TODO, write cgroup from config
 
     def _setup_root(self):
-        os.chroot(self.config["rootfs_path"])
+        os.chroot(self.rootfs_path)
         os.chdir("/")
 
     def _jail_setup_variables(self):
@@ -97,13 +76,13 @@ class Container:
                 return 0
 
             self._clone_process(
-                inner, self.config["stacksize_B"], SIGCHLD
+                inner, self.stacksize_B, SIGCHLD
             )  # Somehow the stack size fixes everything
             self._jail_cleanup()
             return 0  # Must return
 
         self._ensure_cgroup_limits()
         self._clone_process(
-            inner, self.config["stacksize_A"], CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD
+            inner, self.stacksize_A, CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD
         )
         self._cleanup()
