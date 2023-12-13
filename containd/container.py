@@ -1,11 +1,18 @@
 import os
+
+if (
+    os.getuid() != 0
+):  # Module must be running as root - TODO: This might be changed in future versions
+    raise Exception("Module must be run as root")
+
+
 import uuid
 import configparser
 import subprocess
-from ctypes import c_char_p, c_void_p, cast, CFUNCTYPE, c_int
+from ctypes import c_char_p, c_void_p, cast, CFUNCTYPE, c_int, CDLL
 from .flags import *
-from . import libc
 
+libc = CDLL("libc.so.6")
 BASE_CONFIGURATION_PATH = os.path.expanduser(f"~{os.environ['SUDO_USER']}/.containd")
 
 
@@ -21,6 +28,7 @@ def _mk_cgroup(a, b, controllers, relpath):
         capture_output=True,
         text=True,
     )
+
 def _rm_cgroup(controllers, relpath):
     subprocess.run(
         ["cgdelete", "-g", f"{controllers}:{relpath}"],
@@ -28,6 +36,10 @@ def _rm_cgroup(controllers, relpath):
         text=True,
     )
 
+def _cgroup_write(abspath, value):
+    with open(abspath, "w") as f:
+        f.write(str(value))
+    
 class Container:
     def __init__(
         self,
@@ -37,13 +49,11 @@ class Container:
         stacksize_B=1,
         max_memory=1024,
         max_processes=8,
-        remove_cgroup_on_cleanup=False,
+        remove_cgroup_on_cleanup=True,
         _DEBUG_SKIP=False,
     ):
         self.config = {}
-        if (
-            not _DEBUG_SKIP
-        ):  # Temp should still assign id but clear cgroup on leave
+        if not _DEBUG_SKIP:  # Temp should still assign id but clear cgroup on leave
             if not os.path.exists(BASE_CONFIGURATION_PATH):
                 os.mknod(BASE_CONFIGURATION_PATH)
             if _id is not None:  # id given
@@ -55,7 +65,7 @@ class Container:
                 config = configparser.ConfigParser()
                 config.read(BASE_CONFIGURATION_PATH)
                 _id = uuid.uuid4().hex
-                
+
                 config[_id] = {}
                 config[_id]["rootfs_path"] = os.path.abspath(rootfs_path)
                 config[_id]["stacksize_A"] = str(stacksize_A)
@@ -63,7 +73,7 @@ class Container:
                 config[_id]["max_memory"] = str(max_memory)
                 config[_id]["max_processes"] = str(max_processes)
                 self._extract_config(config, _id)
-                
+
                 with open(BASE_CONFIGURATION_PATH, "w") as f:
                     config.write(f)
 
@@ -77,9 +87,16 @@ class Container:
             self.config["max_processes"] = int(max_processes)
 
         self.id = self.config["id"]  # Expose ID to the end user
+        self.cgroup_relpath = "containd/" + self.id + "/"
+        self.cgroup_abspath = "/sys/fs/cgroup/" + self.cgroup_relpath
         self.remove_cgroup_on_cleanup = remove_cgroup_on_cleanup
         # self._main()
-
+    def _ensure_cgroup_limits(self):
+        _cgroup_write(self.cgroup_abspath + "cgroup.procs", os.getpid()) 
+        _cgroup_write(self.cgroup_abspath + "pids.max", self.config["max_processes"])
+        _cgroup_write(self.cgroup_abspath + "memory.max", self.config["max_memory"])
+        #  _cgroup_write(self.cgroup_abspath + "notify_on_release", 1)
+        
     def _extract_config(self, config, _id):
         self.config = {}
         self.config["id"] = _id
@@ -123,10 +140,9 @@ class Container:
 
     def run(self, cmd):
         def inner():
-            self._setup_root() # Root set belongs in child since we need to exit sandbox on function exit
+            self._setup_root()  # Root set belongs in child since we need to exit sandbox on function exit
             self._jail_setup_fs()
             self._jail_setup_variables()
-
             def inner():
                 # os.execvp("/bin/sh", ["/bin/sh"])
                 os.execvp(cmd, [cmd])
@@ -137,7 +153,7 @@ class Container:
             )  # Somehow the stack size fixes everything
             self._jail_cleanup()
             return 0  # Must return
-
+        self._ensure_cgroup_limits()
         self._clone_process(
             inner, self.config["stacksize_A"], CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD
         )
