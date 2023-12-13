@@ -35,7 +35,7 @@ def _rm_cgroup(controllers, relpath):
     )
 
 
-def _write_cgroup(abspath, value):
+def _write_cgroup_rule(abspath, value):
     with open(abspath, "w") as f:
         f.write(str(value))
 

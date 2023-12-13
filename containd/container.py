@@ -2,7 +2,7 @@ import os
 import uuid
 from ctypes import CFUNCTYPE, c_int, CDLL
 from .flags import *
-from .utils import _write_cgroup, _mk_cgroup, _rm_cgroup, _allocate_stack, root_required
+from .utils import _write_cgroup_rule, _mk_cgroup, _allocate_stack, root_required, purge_all
 
 libc = CDLL("libc.so.6")
 
@@ -30,9 +30,9 @@ class Container:
         _mk_cgroup("root", "root", "memory,pids", self.cgroup_relpath)
 
     def _ensure_cgroup_limits(self):
-        _write_cgroup(self.cgroup_abspath + "cgroup.procs", os.getpid())
-        _write_cgroup(self.cgroup_abspath + "pids.max", self.pids_max)
-        _write_cgroup(self.cgroup_abspath + "memory.max", self.memory_max)
+        _write_cgroup_rule(self.cgroup_abspath + "cgroup.procs", os.getpid())
+        _write_cgroup_rule(self.cgroup_abspath + "pids.max", self.pids_max)
+        _write_cgroup_rule(self.cgroup_abspath + "memory.max", self.memory_max)
 
     def _setup_root(self):
         os.chroot(self.rootfs_path)
@@ -58,7 +58,8 @@ class Container:
         libc.wait()  # os.wait needs SIGCHLD as a flag
 
     def _cleanup(self):
-        _rm_cgroup("memory,pids", "containd/" + self.id)
+        # We should remove current cgroup, however this seems to fail since the device is in use. The solution is to empty cgroup.procs
+        purge_all() # At minimum, cleanup directory
 
     def run(self, cmd):
         def jail():
