@@ -17,8 +17,6 @@ class Container:
         stacksize_A=65536,
         stacksize_B=1,
     ):
-        # if os.getuid() != 0:
-        #    raise Exception("Container must be run as root")
 
         self.id = uuid.uuid4().hex
         self.rootfs_path = rootfs_path
@@ -30,16 +28,14 @@ class Container:
         self.cgroup_relpath = "containd/" + self.id + "/"
         self.cgroup_abspath = "/sys/fs/cgroup/" + self.cgroup_relpath
 
+        _mk_cgroup(
+            "root", "root", "memory,pids", self.cgroup_relpath
+        )
+
     def _ensure_cgroup_limits(self):
         _write_cgroup(self.cgroup_abspath + "cgroup.procs", os.getpid())
         _write_cgroup(self.cgroup_abspath + "pids.max", self.pids_max)
         _write_cgroup(self.cgroup_abspath + "memory.max", self.memory_max)
-
-    def _ensure_cgroup_by_id(self, _id):
-        # TODO: Don't create cgroup if it already exists
-        _mk_cgroup(
-            "root", "root", "memory,pids", "containd/" + _id
-        )  #  groups use abs path
 
     def _setup_root(self):
         os.chroot(self.rootfs_path)
