@@ -2,7 +2,13 @@ import os
 import uuid
 from ctypes import CFUNCTYPE, c_int, CDLL
 from .flags import *
-from .utils import _write_cgroup_rule, _mk_cgroup, _allocate_stack, root_required, purge_all
+from .utils import (
+    _write_cgroup_rule,
+    _mk_cgroup,
+    _allocate_stack,
+    root_required,
+    purge_all,
+)
 
 libc = CDLL("libc.so.6")
 
@@ -18,16 +24,37 @@ class Container:
         stacksize_B=1,
     ):
         self.id = uuid.uuid4().hex
-        self.rootfs_path = rootfs_path
-        self.pids_max = pids_max
-        self.memory_max = memory_max
-        self.stacksize_A = stacksize_A
-        self.stacksize_B = stacksize_B
+        self.configure(
+            rootfs_path=rootfs_path,
+            pids_max=pids_max,
+            memory_max=memory_max,
+            stacksize_A=stacksize_A,
+            stacksize_B=stacksize_B,
+        )
 
         self.cgroup_relpath = "containd/" + self.id + "/"
         self.cgroup_abspath = "/sys/fs/cgroup/" + self.cgroup_relpath
 
         _mk_cgroup("root", "root", "memory,pids", self.cgroup_relpath)
+
+    def configure(
+        self,
+        rootfs_path=None,
+        pids_max=None,
+        memory_max=None,
+        stacksize_A=None,
+        stacksize_B=None,
+    ):
+        if rootfs_path != None:
+            self.rootfs_path = rootfs_path
+        if pids_max != None:
+            self.pids_max = pids_max
+        if memory_max != None:
+            self.memory_max = memory_max
+        if stacksize_A != None:
+            self.stacksize_A = stacksize_A
+        if stacksize_B  != None:
+            self.stacksize_B = stacksize_B
 
     def _ensure_cgroup_limits(self):
         _write_cgroup_rule(self.cgroup_abspath + "cgroup.procs", os.getpid())
@@ -59,7 +86,7 @@ class Container:
 
     def _cleanup(self):
         # We should remove current cgroup, however this seems to fail since the device is in use. The solution is to empty cgroup.procs
-        purge_all() # At minimum, cleanup directory
+        purge_all()  # At minimum, cleanup directory
 
     def run(self, cmd):
         def jail():
