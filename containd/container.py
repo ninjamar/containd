@@ -53,7 +53,7 @@ class Container:
             self.memory_max = memory_max
         if stacksize_A != None:
             self.stacksize_A = stacksize_A
-        if stacksize_B  != None:
+        if stacksize_B != None:
             self.stacksize_B = stacksize_B
 
     def _ensure_cgroup_limits(self):
@@ -87,7 +87,6 @@ class Container:
     def _cleanup(self):
         # We should remove current cgroup, however this seems to fail since the device is in use. The solution is to empty cgroup.procs
         purge_all()  # At minimum, cleanup directory
-
     def run(self, cmd):
         def jail():
             self._setup_root()  # Root set belongs in child since we need to exit sandbox on function exit
@@ -106,6 +105,15 @@ class Container:
 
         self._ensure_cgroup_limits()
         self._clone_process(
-            jail, self.stacksize_A, CLONE_NEWPID | CLONE_NEWUTS | SIGCHLD
+            jail,
+            self.stacksize_A,
+            CLONE_NEWNS
+            | CLONE_NEWNET # 
+            | CLONE_NEWIPC
+            | CLONE_NEWUSER # create a new user system - this makes default user not roo
+            | CLONE_NEWPID
+            | CLONE_NEWUTS
+            | CLONE_NEWCGROUP # this is so specific - disable cgroup sharing
+            | SIGCHLD,
         )
         self._cleanup()
