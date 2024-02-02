@@ -111,7 +111,7 @@ class Container:
             CLONE_NEWNS
             | CLONE_NEWNET  #
             | CLONE_NEWIPC
-            | CLONE_NEWUSER  # create a new user system - this makes default user not roo
+            | CLONE_NEWUSER  # create a new user system - this makes default user not root
             | CLONE_NEWPID
             | CLONE_NEWUTS
             | CLONE_NEWCGROUP  # this is so specific - disable cgroup sharing
